@@ -19,7 +19,8 @@ public static class DisplayManager
     {
         public long AdapterLuid { get; init; }        // GPU identity (LUID: High<<32 | Low)
         public uint TargetId    { get; init; }        // Output/connector on that GPU
-        public string DeviceName { get; init; } = ""; // "\\.\DISPLAYn" when available
+        public string DeviceName { get; init; } = ""; // GDI name: "\\.\DISPLAYn"
+        public string DevicePath { get; init; } = ""; // Device interface path: "\\?\DISPLAY#..."
         public string FriendlyName { get; init; } = "";
         public string? EdidManufacturerId { get; init; } // e.g., "DEL"
         public string? EdidProductCode    { get; init; } // hex
@@ -98,7 +99,7 @@ public static class DisplayManager
                 uint targetId = targetInfo.id;
 
                 // names / EDID
-                string deviceName = "", friendly = "";
+                string deviceName = "", devicePath = "", friendly = "";
                 string? mfg = null, prod = null, serial = null;
 
                 var tname = new DISPLAYCONFIG_TARGET_DEVICE_NAME
@@ -114,11 +115,10 @@ public static class DisplayManager
                 int r1 = DisplayConfigGetDeviceInfo(ref tname);
                 if (r1 == 0)
                 {
-                    deviceName = tname.monitorDevicePath;      // often contains "\\.\DISPLAYn"
+                    devicePath = tname.monitorDevicePath;
                     friendly   = tname.monitorFriendlyDeviceName;
                 }
 
-                var edid = new DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS();
                 // EDID is exposed through the same struct’s fields:
                 if (r1 == 0)
                 {
@@ -127,7 +127,22 @@ public static class DisplayManager
                     serial= tname.monitorDevicePath; // sometimes includes serial; no separate field reliably available
                 }
 
-                // source (bounds)
+                // source (bounds & GDI name)
+                string sourceGdiName = "";
+                var sname = new DISPLAYCONFIG_SOURCE_DEVICE_NAME
+                {
+                    header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
+                    {
+                        type = DISPLAYCONFIG_DEVICE_INFO_TYPE.DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                        size = (uint)Marshal.SizeOf<DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
+                        adapterId = sourceInfo.adapterId,
+                        id = sourceInfo.id
+                    }
+                };
+                int r2 = DisplayConfigGetDeviceInfo(ref sname);
+                if (r2 == 0 && !string.IsNullOrWhiteSpace(sname.viewGdiDeviceName))
+                    sourceGdiName = sname.viewGdiDeviceName; // "\\.\DISPLAYn"
+
                 // Find source mode entry
                 var srcMode = modes.FirstOrDefault(m => m.infoType == DISPLAYCONFIG_MODE_INFO_TYPE.DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE
                                                         && m.id == sourceInfo.id
@@ -151,31 +166,19 @@ public static class DisplayManager
                 // primary heuristic: Windows defines primary at virtual (0,0)
                 bool isPrimary = bounds.Left == 0 && bounds.Top == 0;
 
-                // If DeviceName is empty, try to derive "\\.\DISPLAYn" from target path device name
-                if (string.IsNullOrWhiteSpace(deviceName))
-                {
-                    // Try source device name
-                    var sname = new DISPLAYCONFIG_SOURCE_DEVICE_NAME
-                    {
-                        header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
-                        {
-                            type = DISPLAYCONFIG_DEVICE_INFO_TYPE.DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-                            size = (uint)Marshal.SizeOf<DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
-                            adapterId = sourceInfo.adapterId,
-                            id = sourceInfo.id
-                        }
-                    };
-                    int r2 = DisplayConfigGetDeviceInfo(ref sname);
-                    if (r2 == 0 && !string.IsNullOrWhiteSpace(sname.viewGdiDeviceName))
-                        deviceName = sname.viewGdiDeviceName; // e.g., "\\.\DISPLAY1"
-                }
+                // Always prefer the source’s GDI device name for Win32 interop.
+                if (!string.IsNullOrWhiteSpace(sourceGdiName))
+                    deviceName = sourceGdiName;
 
                 var mi = new MonitorInfo
                 {
                     AdapterLuid = luid,
                     TargetId = targetId,
                     DeviceName = deviceName,
-                    FriendlyName = string.IsNullOrWhiteSpace(friendly) ? deviceName : friendly,
+                    DevicePath = devicePath,
+                    FriendlyName = string.IsNullOrWhiteSpace(friendly)
+                        ? (!string.IsNullOrWhiteSpace(deviceName) ? deviceName : devicePath)
+                        : friendly,
                     EdidManufacturerId = mfg,
                     EdidProductCode = prod,
                     EdidSerial = serial,
@@ -293,7 +296,17 @@ public static class DisplayManager
     /// <summary>Hook display topology/DPI changes and invoke callback (e.g., re-place windows).</summary>
     public static void HookDisplayChanges(Window window, Action callback)
     {
-        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, __) => callback();
+        var dispatcher = window.Dispatcher;
+
+        void InvokeOnDispatcher()
+        {
+            if (dispatcher.CheckAccess())
+                callback();
+            else
+                dispatcher.BeginInvoke(callback);
+        }
+
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, __) => InvokeOnDispatcher();
 
         var src = System.Windows.Interop.HwndSource.FromHwnd(
             new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle());
@@ -302,7 +315,7 @@ public static class DisplayManager
         {
             const int WM_DISPLAYCHANGE = 0x007E;
             const int WM_DPICHANGED    = 0x02E0;
-            if (msg == WM_DISPLAYCHANGE || msg == WM_DPICHANGED) callback();
+            if (msg == WM_DISPLAYCHANGE || msg == WM_DPICHANGED) InvokeOnDispatcher();
             return IntPtr.Zero;
         });
     }
@@ -316,8 +329,8 @@ public static class DisplayManager
         log.LogInformation("=== Active Monitors ({count}) ===", list.Count);
         foreach (var m in list)
         {
-            log.LogInformation("Name={name} Device={dev} Luid=0x{l:X} TargetId={t} EDID={edid} Bounds={b} Primary={p}",
-                m.FriendlyName, m.DeviceName, m.AdapterLuid, m.TargetId,
+            log.LogInformation("Name={name} Device={dev} Path={path} Luid=0x{l:X} TargetId={t} EDID={edid} Bounds={b} Primary={p}",
+                m.FriendlyName, m.DeviceName, m.DevicePath, m.AdapterLuid, m.TargetId,
                 FormatEdid(m), m.BoundsPx, m.IsPrimary);
         }
     }

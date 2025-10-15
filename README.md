@@ -4,7 +4,7 @@ Usage examples
 DisplayManager.LogMonitors(_logger);
 
 // Sample log line (copy into settings):
-// Name=DELL U2720Q Device=\\.\DISPLAY2 Luid=0x1234567800012345 TargetId=2 EDID=DEL-0xA0B1 Bounds=L=0,T=0,W=3840,H=2160 Primary=True
+// Name=DELL U2720Q Device=\\.\DISPLAY2 Path=\\?\DISPLAY#DEL1234#5&27b30f9b&0&UID0 Luid=0x1234567800012345 TargetId=2 EDID=DEL-0xA0B1 Bounds=L=0,T=0,W=3840,H=2160 Primary=True
 
 2) Resolve the intended monitor from settings and place the window
 // Retrieve from your SettingsManager (first-run: paste from logs; later runs: persisted)
@@ -60,10 +60,12 @@ Identity: store AdapterLuid (GPU) + TargetId (connector). That pair selects the 
 
 Bounds: taken from DISPLAYCONFIG_SOURCE_MODE.position/width/height (virtual desktop space).
 
-DeviceName: resolved via DISPLAYCONFIG_*_NAME; if missing, fallback match via EnumDisplayDevices to rotate.
+DeviceName: resolved from DISPLAYCONFIG_SOURCE_DEVICE_NAME (always "\\.\\DISPLAYn"), with DevicePath exposing the PnP interface string when you need it for diagnostics.
 
 DPI: ensure Per-Monitor-V2 DPI awareness (app manifest or SetThreadDpiAwarenessContext) so VisualTreeHelper.GetDpi is correct.
 
 Logging: LogMonitors prints everything you need to seed settings on fresh machines.
+
+Display change hooks: callbacks are marshalled onto the window's Dispatcher so WPF UI work is safe.
 
 This is the modern, deterministic way to query, place, and rotate windows on specific displays in .NET 8/WPF.
