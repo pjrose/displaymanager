@@ -57,16 +57,49 @@ public static class DisplayManager
     /// <summary>Enumerate active monitors using Display Configuration.</summary>
     public static IReadOnlyList<MonitorInfo> GetMonitors(ILogger? log = null)
     {
-        // Step 1: Query counts
-        uint numPath = 0, numMode = 0;
-        var rc = QueryDisplayConfig(QDC_ONLY_ACTIVE, ref numPath, IntPtr.Zero, ref numMode, IntPtr.Zero, IntPtr.Zero);
-        if (rc != 0 && rc != ERROR_INSUFFICIENT_BUFFER)
-            throw new InvalidOperationException($"QueryDisplayConfig(counts) failed rc={rc}");
+        InvalidOperationException? lastError = null;
+
+        foreach (var flags in PreferredQueryFlags())
+        {
+            if (TryGetMonitors(flags, log, out var monitors, out var error))
+            {
+                log?.LogDebug("Enumerated monitors using QueryDisplayConfig flags=0x{flags:X}", flags);
+                return monitors;
+            }
+
+            if (error is null)
+                continue;
+
+            if (IsInvalidParameter(error))
+            {
+                lastError = error;
+                continue; // Try the next flag combination.
+            }
+
+            throw error;
+        }
+
+        throw lastError ?? new InvalidOperationException("QueryDisplayConfig failed for all flag combinations.");
+    }
+
+    private static bool TryGetMonitors(uint flags, ILogger? log, out List<MonitorInfo> monitors, out InvalidOperationException? error)
+    {
+        monitors = new List<MonitorInfo>();
+        error = null;
+
+        var rc = GetDisplayConfigBufferSizes(flags, out var numPath, out var numMode);
+        if (rc != 0)
+        {
+            error = CreateDisplayConfigException($"GetDisplayConfigBufferSizes failed rc={rc} (flags=0x{flags:X})", rc, flags);
+            return false;
+        }
 
         if (numPath == 0 || numMode == 0)
-            return Array.Empty<MonitorInfo>();
+        {
+            monitors = new List<MonitorInfo>();
+            return true;
+        }
 
-        // Step 2: Allocate buffers
         int pathSize = Marshal.SizeOf<DISPLAYCONFIG_PATH_INFO>();
         int modeSize = Marshal.SizeOf<DISPLAYCONFIG_MODE_INFO>();
         IntPtr pPaths = Marshal.AllocHGlobal(pathSize * (int)numPath);
@@ -74,9 +107,12 @@ public static class DisplayManager
 
         try
         {
-            rc = QueryDisplayConfig(QDC_ONLY_ACTIVE, ref numPath, pPaths, ref numMode, pModes, IntPtr.Zero);
+            rc = QueryDisplayConfig(flags, ref numPath, pPaths, ref numMode, pModes, IntPtr.Zero);
             if (rc != 0)
-                throw new InvalidOperationException($"QueryDisplayConfig(data) failed rc={rc}");
+            {
+                error = CreateDisplayConfigException($"QueryDisplayConfig(data) failed rc={rc} (flags=0x{flags:X})", rc, flags);
+                return false;
+            }
 
             // Collect modes by id
             var modes = new DISPLAYCONFIG_MODE_INFO[numMode];
@@ -200,13 +236,35 @@ public static class DisplayManager
                     log.LogInformation("Monitor: {info}", m.ToString());
             }
 
-            return result;
+            monitors = result;
+            return true;
         }
         finally
         {
             Marshal.FreeHGlobal(pPaths);
             Marshal.FreeHGlobal(pModes);
         }
+    }
+
+    private static IEnumerable<uint> PreferredQueryFlags()
+    {
+        yield return QDC_ONLY_ACTIVE;
+        yield return QDC_ONLY_ACTIVE | QDC_VIRTUAL_MODE_AWARE;
+        yield return QDC_DATABASE_CURRENT;
+        yield return QDC_DATABASE_CURRENT | QDC_VIRTUAL_MODE_AWARE;
+        yield return QDC_ALL_PATHS;
+        yield return QDC_ALL_PATHS | QDC_VIRTUAL_MODE_AWARE;
+    }
+
+    private static bool IsInvalidParameter(InvalidOperationException ex)
+        => ex.Data.Contains("ErrorCode") && ex.Data["ErrorCode"] is int code && code == ERROR_INVALID_PARAMETER;
+
+    private static InvalidOperationException CreateDisplayConfigException(string message, int errorCode, uint flags)
+    {
+        var ex = new InvalidOperationException(message);
+        ex.Data["ErrorCode"] = errorCode;
+        ex.Data["QueryFlags"] = flags;
+        return ex;
     }
 
     /// <summary>Find by AdapterLuid + TargetId.</summary>
@@ -291,21 +349,20 @@ public static class DisplayManager
             throw new InvalidOperationException($"ChangeDisplaySettingsEx failed rc={rc}");
     }
 
-    /// <summary>
-    /// Hook display topology/DPI changes and invoke callback (e.g., re-place windows).
-    /// Callers can assume the callback executes on the window's dispatcher thread.
-    /// </summary>
+    /// <summary>Hook display topology/DPI changes and invoke callback (e.g., re-place windows).</summary>
     public static void HookDisplayChanges(Window window, Action callback)
     {
         var dispatcher = window.Dispatcher;
 
-        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, __) =>
+        void InvokeOnDispatcher()
         {
             if (dispatcher.CheckAccess())
                 callback();
             else
                 dispatcher.BeginInvoke(callback);
-        };
+        }
+
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, __) => InvokeOnDispatcher();
 
         var src = System.Windows.Interop.HwndSource.FromHwnd(
             new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle());
@@ -314,7 +371,7 @@ public static class DisplayManager
         {
             const int WM_DISPLAYCHANGE = 0x007E;
             const int WM_DPICHANGED    = 0x02E0;
-            if (msg == WM_DISPLAYCHANGE || msg == WM_DPICHANGED) callback();
+            if (msg == WM_DISPLAYCHANGE || msg == WM_DPICHANGED) InvokeOnDispatcher();
             return IntPtr.Zero;
         });
     }
@@ -428,8 +485,15 @@ public static class DisplayManager
     // -------------------------
 
     private const int ERROR_INSUFFICIENT_BUFFER = 122;
+    private const int ERROR_INVALID_PARAMETER = 87;
 
-    private const uint QDC_ONLY_ACTIVE = 0x00000002;
+    private const uint QDC_ALL_PATHS           = 0x00000001;
+    private const uint QDC_ONLY_ACTIVE         = 0x00000002;
+    private const uint QDC_DATABASE_CURRENT    = 0x00000004;
+    private const uint QDC_VIRTUAL_MODE_AWARE  = 0x00000010;
+
+    [DllImport("user32.dll")]
+    private static extern int GetDisplayConfigBufferSizes(uint flags, out uint numPathArrayElements, out uint numModeInfoArrayElements);
 
     [DllImport("user32.dll")]
     private static extern int QueryDisplayConfig(uint flags,
