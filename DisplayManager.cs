@@ -293,20 +293,21 @@ public static class DisplayManager
             throw new InvalidOperationException($"ChangeDisplaySettingsEx failed rc={rc}");
     }
 
-    /// <summary>Hook display topology/DPI changes and invoke callback (e.g., re-place windows).</summary>
+    /// <summary>
+    /// Hook display topology/DPI changes and invoke callback (e.g., re-place windows).
+    /// Callers can assume the callback executes on the window's dispatcher thread.
+    /// </summary>
     public static void HookDisplayChanges(Window window, Action callback)
     {
         var dispatcher = window.Dispatcher;
 
-        void InvokeOnDispatcher()
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, __) =>
         {
             if (dispatcher.CheckAccess())
                 callback();
             else
                 dispatcher.BeginInvoke(callback);
-        }
-
-        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, __) => InvokeOnDispatcher();
+        };
 
         var src = System.Windows.Interop.HwndSource.FromHwnd(
             new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle());
@@ -315,7 +316,7 @@ public static class DisplayManager
         {
             const int WM_DISPLAYCHANGE = 0x007E;
             const int WM_DPICHANGED    = 0x02E0;
-            if (msg == WM_DISPLAYCHANGE || msg == WM_DPICHANGED) InvokeOnDispatcher();
+            if (msg == WM_DISPLAYCHANGE || msg == WM_DPICHANGED) callback();
             return IntPtr.Zero;
         });
     }
