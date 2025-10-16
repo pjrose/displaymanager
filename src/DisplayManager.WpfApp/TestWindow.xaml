@@ -1,0 +1,15 @@
+<Window x:Class="DisplayManager.WpfApp.TestWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Display Placement Test"
+        Width="400" Height="240"
+        WindowStartupLocation="Manual"
+        Background="#FF1F1F1F"
+        Foreground="White">
+    <Grid>
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock Text="Test Placement Window" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,8" />
+            <TextBlock Text="This window is positioned using DisplayManager.ApplyWindow." TextWrapping="Wrap" Width="320" TextAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</Window>
