@@ -19,7 +19,7 @@ public static class DisplayManager
     {
         public long AdapterLuid { get; init; }        // GPU identity (LUID: High<<32 | Low)
         public uint TargetId    { get; init; }        // Output/connector on that GPU
-        public string DeviceName { get; init; } = ""; // GDI name: "\\.\DISPLAYn"
+        public string DeviceName { get; init; } = ""; // GDI name: "\\.\\DISPLAYx"
         public string DevicePath { get; init; } = ""; // Device interface path: "\\?\DISPLAY#..."
         public string FriendlyName { get; init; } = "";
         public string? EdidManufacturerId { get; init; } // e.g., "DEL"
@@ -99,7 +99,7 @@ public static class DisplayManager
                 uint targetId = targetInfo.id;
 
                 // names / EDID
-                string deviceName = "", devicePath = "", friendly = "";
+                string gdiDeviceName = "", devicePath = "", friendly = "";
                 string? mfg = null, prod = null, serial = null;
 
                 var tname = new DISPLAYCONFIG_TARGET_DEVICE_NAME
@@ -128,7 +128,6 @@ public static class DisplayManager
                 }
 
                 // source (bounds & GDI name)
-                string sourceGdiName = "";
                 var sname = new DISPLAYCONFIG_SOURCE_DEVICE_NAME
                 {
                     header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
@@ -140,8 +139,8 @@ public static class DisplayManager
                     }
                 };
                 int r2 = DisplayConfigGetDeviceInfo(ref sname);
-                if (r2 == 0 && !string.IsNullOrWhiteSpace(sname.viewGdiDeviceName))
-                    sourceGdiName = sname.viewGdiDeviceName; // "\\.\DISPLAYn"
+                if (r2 == 0)
+                    gdiDeviceName = sname.viewGdiDeviceName ?? ""; // "\\.\\DISPLAYx"
 
                 // Find source mode entry
                 var srcMode = modes.FirstOrDefault(m => m.infoType == DISPLAYCONFIG_MODE_INFO_TYPE.DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE
@@ -166,18 +165,14 @@ public static class DisplayManager
                 // primary heuristic: Windows defines primary at virtual (0,0)
                 bool isPrimary = bounds.Left == 0 && bounds.Top == 0;
 
-                // Always prefer the source’s GDI device name for Win32 interop.
-                if (!string.IsNullOrWhiteSpace(sourceGdiName))
-                    deviceName = sourceGdiName;
-
                 var mi = new MonitorInfo
                 {
                     AdapterLuid = luid,
                     TargetId = targetId,
-                    DeviceName = deviceName,
+                    DeviceName = gdiDeviceName,
                     DevicePath = devicePath,
                     FriendlyName = string.IsNullOrWhiteSpace(friendly)
-                        ? (!string.IsNullOrWhiteSpace(deviceName) ? deviceName : devicePath)
+                        ? (!string.IsNullOrWhiteSpace(gdiDeviceName) ? gdiDeviceName : devicePath)
                         : friendly,
                     EdidManufacturerId = mfg,
                     EdidProductCode = prod,
@@ -258,11 +253,13 @@ public static class DisplayManager
     /// <summary>Rotate output for the given monitor.</summary>
     public static void Rotate(MonitorInfo mon, Orientations orientation, ILogger? log = null)
     {
-        string deviceName = ResolveDisplayDeviceName(mon);
+        string deviceName = string.IsNullOrWhiteSpace(mon.DeviceName)
+            ? ResolveDisplayDeviceName(mon)
+            : mon.DeviceName;
         if (string.IsNullOrWhiteSpace(deviceName))
-            throw new InvalidOperationException("Cannot resolve \\.\DISPLAYn for rotation.");
+            throw new InvalidOperationException("Cannot resolve \\.\\DISPLAYx for rotation.");
 
-        log?.LogInformation("Rotating {mon} via {dev} to {ori}", mon.ToString(), deviceName, orientation);
+        log?.LogInformation("Rotating {mon} via GDI {gdi} to {ori}", mon.ToString(), deviceName, orientation);
 
         var devmode = new DEVMODE();
         devmode.dmSize = (short)Marshal.SizeOf<DEVMODE>();
@@ -329,7 +326,7 @@ public static class DisplayManager
         log.LogInformation("=== Active Monitors ({count}) ===", list.Count);
         foreach (var m in list)
         {
-            log.LogInformation("Name={name} Device={dev} Path={path} Luid=0x{l:X} TargetId={t} EDID={edid} Bounds={b} Primary={p}",
+            log.LogInformation("Name={name} Gdi={gdi} Path={path} Luid=0x{l:X} TargetId={t} EDID={edid} Bounds={b} Primary={p}",
                 m.FriendlyName, m.DeviceName, m.DevicePath, m.AdapterLuid, m.TargetId,
                 FormatEdid(m), m.BoundsPx, m.IsPrimary);
         }
@@ -404,7 +401,7 @@ public static class DisplayManager
         for (uint i = 0; EnumDisplayDevices(null, i, ref dd, 0); i++)
         {
             if ((dd.StateFlags & DisplayDeviceStateFlags.AttachedToDesktop) == 0) continue;
-            var devName = dd.DeviceName; // "\\.\DISPLAYn"
+            var devName = dd.DeviceName; // "\\.\\DISPLAYx"
 
             var dm = new DEVMODE(); dm.dmSize = (short)Marshal.SizeOf<DEVMODE>();
             if (EnumDisplaySettings(devName, ENUM_CURRENT_SETTINGS, ref dm) == 0) continue;
