@@ -1,10 +1,48 @@
+Display Manager toolkit
+=======================
+
+This repository now ships with a .NET 8 solution that contains the original `DisplayManager` helper, a reusable friendly-name
+store, a WPF harness for runtime experimentation, and unit tests for the persistence components. The layout is:
+
+* `src/DisplayManager.Core` – class library that exposes the `DisplayManager` API and the new `FriendlyNameStore` helper.
+* `src/DisplayManager.WpfApp` – Windows-only sample application that lets you assign friendly names, rotate displays, and place
+  a test window using the library.
+* `tests/DisplayManager.Tests` – xUnit tests that validate the friendly-name persistence helpers.
+
+To build and test on Windows, run:
+
+```
+dotnet build DisplayManager.sln
+dotnet test DisplayManager.sln
+```
+
+> **Note**: cross-compiling the WPF project from non-Windows platforms requires the .NET 8 SDK with Windows Desktop targeting
+> packs installed. The project files enable `EnableWindowsTargeting` so CI environments can perform cross-compilation without
+> running the app.
+
+### Sample application
+
+Launch the harness (`DisplayManager.WpfApp`) to exercise the APIs interactively:
+
+1. **Refresh Monitors** – queries `DisplayManager.GetMonitors` and populates the grid with GDI names, adapter LUIDs, and EDID
+   metadata.
+2. **Assign Friendly Name** – opens a dialog that stores your label via `FriendlyNameStore`, writing to a JSON file under the
+   user's application data folder.
+3. **Locate by Friendly Name** – demonstrates lookup by stored friendly name and falls back to selecting another monitor if the
+   requested display is offline.
+4. **Rotate Display** – prompts for a stored name, lets you pick an orientation, and calls `DisplayManager.Rotate` with the GDI
+   identifier captured during enumeration.
+5. **Show Test Window** – spawns a sample window and positions it with `DisplayManager.ApplyWindow` so you can confirm bounds
+   handling.
+
 Usage examples
+--------------
 1) Log identities on startup (capture AdapterLuid/TargetId)
 // At app boot:
 DisplayManager.LogMonitors(_logger);
 
 // Sample log line (copy into settings):
-// Name=DELL U2720Q Device=\\.\DISPLAY2 Path=\\?\DISPLAY#DEL1234#5&27b30f9b&0&UID0 Luid=0x1234567800012345 TargetId=2 EDID=DEL-0xA0B1 Bounds=L=0,T=0,W=3840,H=2160 Primary=True
+// Name=DELL U2720Q Gdi=\\.\DISPLAY2 Path=\\?\DISPLAY#DEL1234#5&27b30f9b&0&UID0 Luid=0x1234567800012345 TargetId=2 EDID=DEL-0xA0B1 Bounds=L=0,T=0,W=3840,H=2160 Primary=True
 
 2) Resolve the intended monitor from settings and place the window
 // Retrieve from your SettingsManager (first-run: paste from logs; later runs: persisted)
@@ -60,7 +98,7 @@ Identity: store AdapterLuid (GPU) + TargetId (connector). That pair selects the 
 
 Bounds: taken from DISPLAYCONFIG_SOURCE_MODE.position/width/height (virtual desktop space).
 
-DeviceName: resolved from DISPLAYCONFIG_SOURCE_DEVICE_NAME (always "\\.\\DISPLAYn"), with DevicePath exposing the PnP interface string when you need it for diagnostics.
+DeviceName: resolved from DISPLAYCONFIG_SOURCE_DEVICE_NAME (always "\\.\\DISPLAYx"), with DevicePath exposing the PnP interface string when you need it for diagnostics.
 
 DPI: ensure Per-Monitor-V2 DPI awareness (app manifest or SetThreadDpiAwarenessContext) so VisualTreeHelper.GetDpi is correct.
 
