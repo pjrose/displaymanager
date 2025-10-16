@@ -32,8 +32,8 @@ Launch the harness (`DisplayManager.WpfApp`) to exercise the APIs interactively:
    requested display is offline.
 4. **Rotate Display** – prompts for a stored name, lets you pick an orientation, and calls `DisplayManager.Rotate` with the GDI
    identifier captured during enumeration.
-5. **Show Test Window** – spawns a sample window and positions it with `DisplayManager.ApplyWindow` so you can confirm bounds
-   handling.
+5. **Show Test Window** – spawns a sample window, positions it with `DisplayManager.ApplyWindow`, and registers it with the
+   `WindowPlacementTracker` so it comes back automatically after topology changes.
 
 Usage examples
 --------------
@@ -54,8 +54,11 @@ string? contains = SettingsManager.Instance.TryGet<string>("Participant", "NameC
 // Pick monitor (by id → by name → primary)
 var mon = DisplayManager.PickBySettingsOrFallback(adapterLuid, targetId, contains, _logger);
 
+// Track window placements so they can be restored automatically later.
+var placementTracker = new WindowPlacementTracker();
+
 // Place and maximize
-DisplayManager.ApplyWindow(_floatingWindow, mon, maximize: true, log: _logger);
+DisplayManager.ApplyWindow(_floatingWindow, mon, maximize: true, log: _logger, tracker: placementTracker);
 _floatingWindow.Show();
 _floatingWindow.Activate();
 _fractWebViewControl.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
@@ -78,17 +81,11 @@ DisplayManager.HookDisplayChanges(_floatingWindow, () =>
 {
     try
     {
-        var mon = DisplayManager.PickBySettingsOrFallback(
-            SettingsManager.Instance.Get<long>("Participant", "AdapterLuid"),
-            SettingsManager.Instance.Get<uint>("Participant", "TargetId"),
-            SettingsManager.Instance.TryGet<string>("Participant", "NameContains", out var s) ? s : null,
-            _logger);
-
-        DisplayManager.ApplyWindow(_floatingWindow, mon, maximize: true, log: _logger);
+        placementTracker.RestoreTrackedWindows(_logger);
     }
     catch (Exception ex)
     {
-        _logger.LogError(ex, "Re-placing window on display change failed.");
+        _logger.LogError(ex, "Re-placing windows on display change failed.");
     }
 });
 
@@ -104,6 +101,7 @@ DPI: ensure Per-Monitor-V2 DPI awareness (app manifest or SetThreadDpiAwarenessC
 
 Logging: LogMonitors prints everything you need to seed settings on fresh machines.
 
-Display change hooks: callbacks are marshalled onto the window's Dispatcher so WPF UI work is safe.
+Display change hooks: callbacks are marshalled onto the window's Dispatcher so WPF UI work is safe. Use
+`WindowPlacementTracker.RestoreTrackedWindows` inside the hook to relocate any windows you previously placed.
 
 This is the modern, deterministic way to query, place, and rotate windows on specific displays in .NET 8/WPF.
