@@ -49,6 +49,7 @@
                     <Button Content="Locate by Friendly Name" Click="LocateMonitor_Click" />
                     <Button Content="Rotate Display" Click="RotateMonitor_Click" />
                     <Button Content="Show Test Window" Click="ShowTestWindow_Click" />
+                    <Button Content="Tracked Windows" Click="ShowTrackedWindows_Click" />
                 </StackPanel>
                 <DataGrid ItemsSource="{Binding Monitors}" SelectedItem="{Binding SelectedMonitor, Mode=TwoWay}"
                           AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
