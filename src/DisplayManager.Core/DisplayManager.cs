@@ -1,6 +1,5 @@
 #nullable enable
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -8,6 +7,8 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Extensions.Logging;
+
+namespace DisplayManagerLib;
 
 public static class DisplayManager
 {
@@ -36,8 +37,8 @@ public static class DisplayManager
     public struct RectPx
     {
         public int Left, Top, Right, Bottom;
-        public int Width  => Right - Left;
-        public int Height => Bottom - Top;
+        public readonly int Width  => Right - Left;
+        public readonly int Height => Bottom - Top;
         public override readonly string ToString() => $"L={Left},T={Top},W={Width},H={Height}";
     }
 
@@ -285,7 +286,7 @@ public static class DisplayManager
             _ => DMDO_DEFAULT
         };
 
-        var rc = ChangeDisplaySettingsEx(deviceName, ref devmode, IntPtr.Zero, DisplaySettingsFlags.CDS_UPDATEREGISTRY, IntPtr.Zero);
+        var rc = (DISP_CHANGE)ChangeDisplaySettingsEx(deviceName, ref devmode, IntPtr.Zero, DisplaySettingsFlags.CDS_UPDATEREGISTRY, IntPtr.Zero);
         if (rc != DISP_CHANGE.Successful && rc != DISP_CHANGE.Restart)
             throw new InvalidOperationException($"ChangeDisplaySettingsEx failed rc={rc}");
     }
