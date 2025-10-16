@@ -178,6 +178,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StatusMessage = $"Moved test window to '{friendlyName}'.";
     }
 
+    private void ShowTrackedWindows_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new TrackedWindowsDialog(_placementTracker, Monitors)
+        {
+            Owner = this
+        };
+
+        dialog.ShowDialog();
+    }
+
     private MonitorViewModel? PromptForMonitorByFriendlyName(out string friendlyName)
     {
         friendlyName = string.Empty;

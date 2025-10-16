@@ -16,14 +16,18 @@ public sealed class WindowPlacementTracker
     private readonly object _sync = new();
     private readonly List<TrackedWindow> _tracked = new();
 
+    public event EventHandler? TrackedWindowsChanged;
+
     /// <summary>Records the placement for the supplied window/monitor pair.</summary>
     public void Record(Window window, DisplayManager.MonitorInfo monitor, WindowPlacementOptions options, ILogger? log = null)
     {
         if (window is null) throw new ArgumentNullException(nameof(window));
 
+        var changed = false;
+
         lock (_sync)
         {
-            CleanupDeadEntries();
+            changed |= CleanupDeadEntriesUnsafe();
 
             var existing = FindTrackedWindow(window);
             if (existing != null)
@@ -34,13 +38,19 @@ public sealed class WindowPlacementTracker
 
             var trackedWindow = new TrackedWindow(this, window, monitor, options, log);
             _tracked.Add(trackedWindow);
+            changed = true;
         }
+
+        if (changed)
+            OnTrackedWindowsChanged();
     }
 
     /// <summary>Stops tracking the supplied window (e.g., before disposing it manually).</summary>
     public void Forget(Window window)
     {
         if (window is null) throw new ArgumentNullException(nameof(window));
+
+        var changed = false;
 
         lock (_sync)
         {
@@ -50,7 +60,11 @@ public sealed class WindowPlacementTracker
 
             tracked.Detach();
             _tracked.Remove(tracked);
+            changed = true;
         }
+
+        if (changed)
+            OnTrackedWindowsChanged();
     }
 
     /// <summary>
@@ -59,12 +73,16 @@ public sealed class WindowPlacementTracker
     public void RestoreTrackedWindows(ILogger? log = null)
     {
         List<TrackedWindow> snapshot;
+        var removedDead = false;
 
         lock (_sync)
         {
-            CleanupDeadEntries();
+            removedDead = CleanupDeadEntriesUnsafe();
             snapshot = _tracked.ToList();
         }
+
+        if (removedDead)
+            OnTrackedWindowsChanged();
 
         foreach (var tracked in snapshot)
         {
@@ -113,20 +131,64 @@ public sealed class WindowPlacementTracker
         }
     }
 
+    public IReadOnlyList<TrackedWindowInfo> GetTrackedWindows()
+    {
+        List<TrackedWindow> snapshot;
+
+        lock (_sync)
+        {
+            CleanupDeadEntriesUnsafe();
+            snapshot = _tracked.ToList();
+        }
+
+        return snapshot.Select(t => t.ToInfo()).ToList();
+    }
+
+    public bool TryGetWindow(Guid id, out Window? window)
+    {
+        TrackedWindow? tracked;
+
+        lock (_sync)
+        {
+            tracked = _tracked.FirstOrDefault(t => t.Id == id);
+            if (tracked is null)
+            {
+                window = null;
+                return false;
+            }
+
+            if (tracked.WindowRef.TryGetTarget(out var resolved))
+            {
+                window = resolved;
+                return true;
+            }
+        }
+
+        RemoveDeadEntry(tracked!);
+        window = null;
+        return false;
+    }
+
     private void HandleWindowClosed(TrackedWindow tracked)
     {
+        var removed = false;
+
         lock (_sync)
         {
             tracked.Detach();
-            _tracked.Remove(tracked);
+            removed = _tracked.Remove(tracked);
         }
+
+        if (removed)
+            OnTrackedWindowsChanged();
     }
 
     private TrackedWindow? FindTrackedWindow(Window window)
         => _tracked.FirstOrDefault(t => t.WindowRef.TryGetTarget(out var w) && ReferenceEquals(w, window));
 
-    private void CleanupDeadEntries()
+    private bool CleanupDeadEntriesUnsafe()
     {
+        var removed = false;
         for (int i = _tracked.Count - 1; i >= 0; i--)
         {
             if (_tracked[i].WindowRef.TryGetTarget(out _))
@@ -134,22 +196,36 @@ public sealed class WindowPlacementTracker
 
             _tracked[i].Detach();
             _tracked.RemoveAt(i);
+            removed = true;
         }
+        return removed;
     }
 
     private void RemoveDeadEntry(TrackedWindow tracked)
     {
+        var removed = false;
+
         lock (_sync)
         {
-            if (_tracked.Remove(tracked))
-                tracked.Detach();
+            removed = _tracked.Remove(tracked);
+        }
+
+        if (removed)
+        {
+            tracked.Detach();
+            OnTrackedWindowsChanged();
         }
     }
+
+    private void OnTrackedWindowsChanged()
+        => TrackedWindowsChanged?.Invoke(this, EventArgs.Empty);
 
     private sealed class TrackedWindow
     {
         private readonly WindowPlacementTracker _owner;
         private readonly EventHandler _closedHandler;
+
+        public Guid Id { get; } = Guid.NewGuid();
 
         public WeakReference<Window> WindowRef { get; }
         public long AdapterLuid { get; private set; }
@@ -184,8 +260,24 @@ public sealed class WindowPlacementTracker
             if (WindowRef.TryGetTarget(out var window))
                 window.Closed -= _closedHandler;
         }
+
+        public TrackedWindowInfo ToInfo()
+        {
+            var isAlive = WindowRef.TryGetTarget(out _);
+            return new TrackedWindowInfo(Id, WindowName, isAlive, AdapterLuid, TargetId, LastKnownFriendlyName, Options);
+        }
     }
 }
 
 /// <summary>Options describing how a window was positioned.</summary>
 public readonly record struct WindowPlacementOptions(bool Maximize, double? WidthDip, double? HeightDip, double MarginDip);
+
+/// <summary>Snapshot information about a window tracked by <see cref="WindowPlacementTracker"/>.</summary>
+public sealed record class TrackedWindowInfo(
+    Guid Id,
+    string WindowName,
+    bool IsAlive,
+    long AdapterLuid,
+    uint TargetId,
+    string LastKnownFriendlyName,
+    WindowPlacementOptions Options);

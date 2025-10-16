@@ -1,0 +1,57 @@
+<Window x:Class="DisplayManager.WpfApp.TrackedWindowsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Tracked Windows"
+        Height="420" Width="780"
+        WindowStartupLocation="CenterOwner"
+        Background="#FF1F1F1F"
+        Foreground="White">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Margin" Value="4" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="#FF3A6EA5" />
+            <Setter Property="BorderBrush" Value="#FF2C4E73" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="AlternatingRowBackground" Value="#FF1F1F1F" />
+            <Setter Property="RowBackground" Value="#FF333333" />
+            <Setter Property="HeadersVisibility" Value="Column" />
+            <Setter Property="GridLinesVisibility" Value="Horizontal" />
+            <Setter Property="BorderBrush" Value="#FF444444" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DataGrid ItemsSource="{Binding TrackedWindows}" SelectedItem="{Binding SelectedTrackedWindow, Mode=TwoWay}"
+                  AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                  HeadersVisibility="Column" IsReadOnly="True">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Window" Binding="{Binding WindowName}" Width="2*" />
+                <DataGridTextColumn Header="Friendly Name" Binding="{Binding FriendlyName}" Width="2*" />
+                <DataGridTextColumn Header="Adapter LUID" Binding="{Binding AdapterLuidHex}" Width="*" />
+                <DataGridTextColumn Header="Target Id" Binding="{Binding TargetId}" Width="*" />
+                <DataGridTextColumn Header="Placement" Binding="{Binding PlacementDescription}" Width="2*" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <ComboBox Width="260" ItemsSource="{Binding Monitors}" SelectedItem="{Binding SelectedMonitor, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayName" />
+            <Button Content="Send to Monitor" Click="SendToMonitor_Click" />
+            <Button Content="Close" Click="Close_Click" />
+        </StackPanel>
+    </Grid>
+</Window>
