@@ -12,6 +12,7 @@ namespace DisplayManager.WpfApp;
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private readonly FriendlyNameStore _friendlyNameStore = new();
+    private readonly WindowPlacementTracker _placementTracker = new();
 
     public ObservableCollection<MonitorViewModel> Monitors { get; } = new();
 
@@ -64,6 +65,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         RefreshMonitors();
+
+        DisplayLib.HookDisplayChanges(this, () =>
+        {
+            RefreshMonitors();
+            _placementTracker.RestoreTrackedWindows();
+        });
     }
 
     private void RefreshMonitors()
@@ -167,7 +174,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var testWindow = new TestWindow { Owner = this };
         testWindow.Show();
-        DisplayLib.ApplyWindow(testWindow, monitor.Info, maximize: false, widthDip: 400, heightDip: 240, marginDip: 30);
+        DisplayLib.ApplyWindow(testWindow, monitor.Info, maximize: false, widthDip: 400, heightDip: 240, marginDip: 30, tracker: _placementTracker);
         StatusMessage = $"Moved test window to '{friendlyName}'.";
     }
 

@@ -291,7 +291,7 @@ public static class DisplayManager
     }
 
     /// <summary>Place/size a WPF window on a monitor; optionally maximize.</summary>
-    public static void ApplyWindow(Window win, MonitorInfo mon, bool maximize, double? widthDip = null, double? heightDip = null, double marginDip = 0, ILogger? log = null)
+    public static void ApplyWindow(Window win, MonitorInfo mon, bool maximize, double? widthDip = null, double? heightDip = null, double marginDip = 0, ILogger? log = null, WindowPlacementTracker? tracker = null)
     {
         var hwnd = new System.Windows.Interop.WindowInteropHelper(win).EnsureHandle();
         var dpi = VisualTreeHelper.GetDpi(win); // Requires PMv2 DPI awareness
@@ -307,6 +307,8 @@ public static class DisplayManager
 
         SetWindowPos(hwnd, IntPtr.Zero, x, y, wPx, hPx, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         if (maximize) win.WindowState = WindowState.Maximized;
+
+        tracker?.Record(win, mon, new WindowPlacementOptions(maximize, widthDip, heightDip, marginDip), log);
     }
 
     /// <summary>Rotate output for the given monitor.</summary>
